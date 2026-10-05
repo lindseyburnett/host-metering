@@ -1,0 +1,9 @@
+include LICENSE README.md CONTRIBUTING.md CHANGELOG.md Makefile
+recursive-include tests *.py
+recursive-include tools *.py
+recursive-include contrib *
+recursive-include mocks *.sh *.cnf subscription-manager
+recursive-include .devcontainer *
+recursive-exclude * __pycache__ *.pyc
+exclude contrib/rpm/host-metering.spec
+exclude .devcontainer/docker-compose.local.yml

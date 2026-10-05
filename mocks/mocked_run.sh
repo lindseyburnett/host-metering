@@ -7,5 +7,5 @@ PATH=$MOCKS_PATH:$PATH
 popd
 
 pushd $(dirname "$0")/..
-HOST_METERING_HOST_CERT_PATH=$MOCKS_PATH/consumer/cert.pem HOST_METERING_HOST_CERT_KEY_PATH=$MOCKS_PATH/consumer/key.pem go run main.go $@
+HOST_METERING_HOST_CERT_PATH=$MOCKS_PATH/consumer/cert.pem HOST_METERING_HOST_CERT_KEY_PATH=$MOCKS_PATH/consumer/key.pem python3 -m host_metering "$@"
 popd

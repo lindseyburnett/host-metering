@@ -1,218 +1,108 @@
 #!/usr/bin/make -f
 
+PYTHON ?= python3
 PROJECT := host-metering
-RPMNAME := host-metering
-VERSION := $(shell grep "Version" version/version.go | awk -F '"' '{print $$2}')
+VERSION := $(shell $(PYTHON) tools/build.py version)
 NEXT_VERSION ?=
 SHORT_COMMIT ?= $(shell git rev-parse --short=8 HEAD)
-AUTORELEASE ?= "git$(shell date "+%Y%m%d%H%M")G$(SHORT_COMMIT)"
-
-UBI_VERSION ?= 7
-
+AUTORELEASE ?= git$(shell date "+%Y%m%d%H%M")G$(SHORT_COMMIT)
+UBI_VERSION ?= 9
 DISTDIR ?= $(CURDIR)/dist
 RPMTOPDIR := $(DISTDIR)/rpmbuild
+MOCKS_DIR := $(CURDIR)/mocks
+COMPOSE := podman-compose -f .devcontainer/docker-compose.yml
 
-GO := go
-TESTDIR := $(CURDIR)/test
+.PHONY: test test-ff build build-selinux cert test-daemon
+test:
+	$(PYTHON) -m unittest discover -s tests -v
 
-DASHBOARD_URL = http://localhost:9090/graph?g0.expr=system_cpu_logical_count&g0.tab=0&g0.range_input=1m
+test-ff:
+	$(PYTHON) -m unittest discover -s tests -f
 
-MOCKS_DIR = $(TESTDIR)/../mocks
-
-# Test
-.PHONY: test
-test: vendor
-	@echo "Running the unit tests..."
-
-	PATH=$(MOCKS_DIR):$(PATH) \
-	$(GO) test -v \
-	-coverprofile=coverage.out \
-	-covermode=atomic \
-	-coverpkg=./... \
-	./...
-
-
-	@echo "Calculating the coverage..."
-	$(GO) tool cover -html=coverage.out -o coverage.html
-	$(GO) tool cover -func=coverage.out -o coverage.txt
-
-	@cat coverage.txt
-
-# Non-verbose failfast variant of unit tests
-.PHONY: test-ff
-test-ff: vendor
-	@echo "Running the unit tests..."
-
-	PATH=$(MOCKS_DIR):$(PATH) \
-	$(GO) test -failfast  ./...
-
-# Build
-.PHONY: build
 build:
-	@echo "Building the project..."
-	$(GO) build -o $(DISTDIR)/$(PROJECT)
+	$(PYTHON) tools/build.py build --distdir "$(DISTDIR)"
 
-.PHONY: build-selinux
 build-selinux:
-	@echo "Building SELinux policy..."
-	cd contrib/selinux && \
-		make -f /usr/share/selinux/devel/Makefile $(PROJECT).pp || exit
+	$(MAKE) -C contrib/selinux -f /usr/share/selinux/devel/Makefile $(PROJECT).pp
 
-# Functional testing (manual or automatic)
+cert:
+	@if [ ! -s mocks/consumer/cert.pem ] || [ ! -s mocks/consumer/key.pem ]; then \
+		cd mocks && ./create-cert.sh; \
+	fi
 
-.PHONY: container-env-setup
-container-env-setup:
-ifndef IS_IN_CONTAINER
-CONTAINER_TARGET = prometheus
-PROMETHEUS_ADDRESS = http://localhost:9090/api/v1/write
+ifdef IS_IN_CONTAINER
+PROMETHEUS_ADDRESS := http://prometheus:9090/api/v1/write
+PROMETHEUS_TARGET :=
 else
-CONTAINER_TARGET =
-PROMETHEUS_ADDRESS = http://prometheus:9090/api/v1/write
+PROMETHEUS_ADDRESS := http://localhost:9090/api/v1/write
+PROMETHEUS_TARGET := prometheus
 endif
 
-.PHONY: test-daemon
-test-daemon: cert build container-env-setup $(CONTAINER_TARGET)
-	@echo "Running $(PROJECT) in daemon mode..."
+test-daemon: cert build $(PROMETHEUS_TARGET)
+	PATH="$(MOCKS_DIR):$(PATH)" HOST_METERING_WRITE_URL=$(PROMETHEUS_ADDRESS) \
+	$(PYTHON) $(DISTDIR)/$(PROJECT) --config .devcontainer/host-metering.conf daemon
 
-	PATH=$(MOCKS_DIR):$(PATH) \
-	HOST_METERING_WRITE_URL=$(PROMETHEUS_ADDRESS) \
-	$(DISTDIR)/$(PROJECT) --config .devcontainer/host-metering.conf daemon
-
-cert: mocks/consumer/cert.pem mocks/consumer/key.pem
-
-mocks/consumer/cert.pem mocks/consumer/key.pem:
-	@echo "Generating test certificates..."
-	cd mocks && ./create-cert.sh
-
-# Containers
-
-.PHONY: podman-containers
+.PHONY: podman-containers prometheus prometheus-stop promtool-check-config clean-pod
 podman-containers:
-	podman build --no-cache -t devcontainer_host-metering --build-arg UBI_VERSION=$(UBI_VERSION) -f .devcontainer/Dockerfile .
-	
-.PHONY: prometheus
-prometheus: podman-containers
-	@echo "See the dashboard at: ${DASHBOARD_URL}"
+	podman build -t devcontainer_host-metering --build-arg UBI_VERSION=$(UBI_VERSION) -f .devcontainer/Dockerfile .
 
-	podman-compose -f .devcontainer/docker-compose.yml up -d prometheus
+prometheus:
+	$(COMPOSE) up -d prometheus
 
-.PHONY: prometheus-stop
 prometheus-stop:
-	podman-compose -f .devcontainer/docker-compose.yml stop prometheus
+	$(COMPOSE) stop prometheus
 
-.PHONY: podman-%
 podman-%:
-	podman-compose -f .devcontainer/docker-compose.yml run -u root host-metering bash -c "cd /workspace/host-metering && make $(subst podman-,,$@)"
+	$(COMPOSE) run --rm -u root host-metering $(MAKE) $(subst podman-,,$@)
 
-.PHONY: promtool-check-config
 promtool-check-config:
-	podman-compose -f .devcontainer/docker-compose.yml up promtool
+	$(COMPOSE) run --rm promtool
 
-.PHONY: clean-pod
 clean-pod:
-	podman-compose -f .devcontainer/docker-compose.yml down
+	$(COMPOSE) down
 
-# Release
-.PHONY: version
+.PHONY: version version-update tarball rpm/spec rpm/srpm rpm rpm/mock rpm/mock-8 rpm/mock-9 mock mock-8 mock-9
 version:
-	@echo $(VERSION)
+	@$(PYTHON) tools/build.py version
 
-.PHONY: version-update
 version-update:
-	@test -n "$(NEXT_VERSION)" || (echo "NEXT_VERSION is not set"; exit 1)
-	@echo "Updating the version to $(NEXT_VERSION)..."
-	sed -i "s/Version = \".*\"/Version = \"$(NEXT_VERSION)\"/" version/version.go
+	$(PYTHON) tools/build.py version-update --version "$(NEXT_VERSION)"
 
-.PHONY: distdir
-distdir:
-	@echo "Creating the destination directory..."
-	mkdir -p $(DISTDIR)
+tarball:
+	$(PYTHON) tools/build.py tarball --distdir "$(DISTDIR)"
 
-# Ensure vendor was run at least once
-vendor:
-	$(MAKE) force-vendor
-
-# refresh vendor cache
-.PHONY: force-vendor
-force-vendor:
-	@echo "Downloading go dependencies..."
-	$(GO) mod tidy && $(GO) mod vendor
-
-.PHONY: tarball
-tarball: distdir force-vendor
-	@echo "Creating a tarball with the source code..."
-	git archive \
-	    --format="tar" \
-	    --prefix=$(PROJECT)-$(VERSION)/ \
-	    --output $(DISTDIR)/$(PROJECT)-$(VERSION).tar \
-	    HEAD
-
-	@echo "Adding go dependencies to the tarball..."
-	tar --append \
-	    --transform="s/^\./$(PROJECT)-$(VERSION)/" \
-	    --file $(DISTDIR)/$(PROJECT)-$(VERSION).tar \
-	    ./vendor
-
-	@echo "Compressing the tarball..."
-	gzip -f $(DISTDIR)/$(PROJECT)-$(VERSION).tar
-
-# RPM build
-.PHONY: rpm/spec
 rpm/spec:
-	sed "s/#VERSION#/${VERSION}/" contrib/rpm/host-metering.spec.in > contrib/rpm/$(RPMNAME).spec
-	sed "s/#AUTORELEASE#/${AUTORELEASE}/" -i contrib/rpm/$(RPMNAME).spec
+	$(PYTHON) tools/build.py spec --release "$(AUTORELEASE)"
 
-.PHONY: rpm/srpm
 rpm/srpm: tarball rpm/spec
 	mkdir -p $(RPMTOPDIR)/SOURCES
 	cp $(DISTDIR)/$(PROJECT)-$(VERSION).tar.gz $(RPMTOPDIR)/SOURCES/
-	rm -rf $(RPMTOPDIR)/SRPMS/*
-	rpmbuild --define '_topdir $(RPMTOPDIR)' -bs contrib/rpm/$(RPMNAME).spec
+	rpmbuild --define '_topdir $(RPMTOPDIR)' -bs contrib/rpm/$(PROJECT).spec
 
-.PHONY: rpm
 rpm: rpm/srpm
-	rpmbuild --define '_topdir $(RPMTOPDIR)' -bb contrib/rpm/$(RPMNAME).spec
+	rpmbuild --define '_topdir $(RPMTOPDIR)' -bb contrib/rpm/$(PROJECT).spec
 
-.PHONY: rpm/mock
 rpm/mock: rpm/srpm
-	mkdir -p $(DISTDIR)/mock7
-	mock -r contrib/rpm/epel-7-x86_64-custom.cfg \
-	     --resultdir=$(DISTDIR)/mock7/ \
-	     --rebuild $(RPMTOPDIR)/SRPMS/$(shell ls -1 $(RPMTOPDIR)/SRPMS)
+	mock -r contrib/rpm/epel-7-x86_64-custom.cfg --resultdir=$(DISTDIR)/mock7 \
+	--rebuild $(RPMTOPDIR)/SRPMS/$(PROJECT)-$(VERSION)-$(AUTORELEASE)*.src.rpm
 
-.PHONY: rpm/mock-8
 rpm/mock-8: rpm/srpm
-	mkdir -p $(DISTDIR)/mock8
-	mock -r centos-stream-8-x86_64 \
-	     --resultdir=$(DISTDIR)/mock8/ \
-	     --rebuild $(RPMTOPDIR)/SRPMS/$(shell ls -1 $(RPMTOPDIR)/SRPMS)
+	mock -r centos-stream-8-x86_64 --resultdir=$(DISTDIR)/mock8 \
+	--rebuild $(RPMTOPDIR)/SRPMS/$(PROJECT)-$(VERSION)-$(AUTORELEASE)*.src.rpm
 
-.PHONY: rpm/mock-9
 rpm/mock-9: rpm/srpm
-	mkdir -p $(DISTDIR)/mock9
-	mock -r centos-stream-9-x86_64 \
-	     --resultdir=$(DISTDIR)/mock9 \
-	     --rebuild $(RPMTOPDIR)/SRPMS/$(shell ls -1 $(RPMTOPDIR)/SRPMS)
+	mock -r centos-stream-9-x86_64 --resultdir=$(DISTDIR)/mock9 \
+	--rebuild $(RPMTOPDIR)/SRPMS/$(PROJECT)-$(VERSION)-$(AUTORELEASE)*.src.rpm
 
-# Clean
-.PHONY: clean
+mock: rpm/mock
+mock-8: rpm/mock-8
+mock-9: rpm/mock-9
+
+.PHONY: clean clean-node clean-all
 clean:
-	@echo "Cleaning the project..."
-	rm -rf $(DISTDIR)
-	rm -rf $(CURDIR)/vendor
-	rm -rf $(CURDIR)/coverage.out
-	rm -rf $(CURDIR)/coverage.html
-	rm -rf $(CURDIR)/coverage.txt
-	rm -rf $(CURDIR)/$(PROJECT)
-	rm -rf $(CURDIR)/contrib/selinux/tmp
-	rm -rf $(CURDIR)/contrib/selinux/*.pp
-	rm -rf $(MOCKS_DIR)/cpumetrics
-	rm -rf $(MOCKS_DIR)/consumer
+	rm -rf -- "$(DISTDIR)" build host_metering.egg-info coverage.out coverage.html coverage.txt
 
-.PHONY: clean-node
 clean-node:
-	@echo "Cleaning the node..."
-	rm -rf $(CURDIR)/node_modules
+	rm -rf -- node_modules
 
-.PHONY: clean-all
 clean-all: clean clean-pod clean-node

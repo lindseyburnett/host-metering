@@ -1,0 +1,37 @@
+name: Python
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ['3.9', '3.11', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: make test build tarball
+      - run: python dist/host-metering help
+      - run: python -m pip install '.[https-proxy]'
+      - run: host-metering --version
+      - run: python -m unittest tests.test_notifier.TLSProxyTests.test_https_receiver_through_https_proxy -v
+      - run: python -m pip install protobuf python-snappy
+      - run: python -m tools.verify_wire
+      - uses: actions/upload-artifact@v4
+        with:
+          name: host-metering-python-${{ matrix.python }}
+          path: dist/
+
+  python36:
+    runs-on: ubuntu-latest
+    container: python:3.6-buster
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test build
+      - run: python dist/host-metering help

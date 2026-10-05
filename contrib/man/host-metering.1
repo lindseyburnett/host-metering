@@ -6,7 +6,7 @@ host-metering \- Host metering service
 .SH "SYNOPSIS"
 .B host-metering
 [\fB\-\-config\fR \fICONFIG_FILE_PATH\fR]
-.IR daemon
+.IR "daemon|once|help"
 
 .SH "DESCRIPTION"
 .B host-metering
@@ -52,7 +52,8 @@ A single asterisk (*) indicates that no proxying should be done.
 A best effort is made to parse the string and errors are
 ignored.
 
-More details can be found on the official go http documentation: https://pkg.go.dev/net/http#ProxyFromEnvironment
+Loopback addresses and localhost always bypass proxies. Uppercase proxy
+variables take precedence over lowercase variants.
 
 \fBHOST_METERING_WRITE_URL\fR
 Remote server endpoint.
@@ -112,6 +113,14 @@ Default configuration file.
 \fI/var/run/host-metering\fR
 .RS 4
 The default directory for storing write ahead log files
+.PP
+The Python implementation stores samples in samples.sqlite3 and imports the
+former Go binary WAL segments once on first startup. Stop the old service before
+upgrading; the original segments are retained.
+
+.SH "SIGNALS"
+SIGHUP refreshes subscription labels and TLS credentials. SIGINT and SIGTERM stop
+the daemon. Certificate and key changes are polled once per second.
 
 .SH "EXIT STATUS"
 0 if the command was successful

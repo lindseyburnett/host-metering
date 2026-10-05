@@ -1,6 +1,11 @@
 # Build / Release
 dist/
-vendor/
+build/
+*.egg-info/
+__pycache__/
+*.py[cod]
+.venv/
+.coverage
 contrib/rpm/host-metering.spec
 contrib/selinux/tmp/
 contrib/selinux/host-metering.pp

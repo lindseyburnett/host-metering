@@ -1,18 +1,7 @@
 %bcond_without check
 
-%if 0%{?rhel} <= 7 && ! 0%{?fedora} && ! 0%{?centos}
-%define gobuild(o:) scl enable go-toolset-1.19 -- go build -mod vendor -buildmode pie -compiler gc -tags="rpm_crashtraceback ${BUILDTAGS:-}" -ldflags "${GO_LDFLAGS:-} ${LDFLAGS:-} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '-Wl,-z,relro -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld'" -a -v %{?**};
-%endif
-%if 0%{?rhel} <= 7 && ! 0%{?fedora} && 0%{?centos}
-
-%define gobuild(o:) go build -mod vendor -buildmode pie -compiler gc -tags="rpm_crashtraceback ${BUILDTAGS:-}" -ldflags "${GO_LDFLAGS:-} ${LDFLAGS:-} -B 0x$(head -c20 /dev/urandom|od -An -tx1|tr -d ' \\n') -extldflags '-Wl,-z,relro -Wl,-z,now -specs=/usr/lib/rpm/redhat/redhat-hardened-ld'" -a -v %{?**};
-%endif
-
-%global goipath         github.com/RedHatInsights/host-metering
 %global forgeurl        https://github.com/RedHatInsights/host-metering/
 %global autorelease     #AUTORELEASE#
-%global gomodulesmode   GO111MODULE=on
-%global godocs          README.md
 
 # macros needed by SELinux
 %global selinuxtype     targeted
@@ -22,23 +11,22 @@
 Name:           host-metering
 Version:        #VERSION#
 Release:        %{autorelease}%{?dist}
-Summary:        None
+Summary:        Host CPU metering with subscription information
 
 License:        Apache-2.0
+BuildArch:      noarch
 ExcludeArch:    %{ix86} s390 s390x ppc ppc64
 URL:            https://github.com/RedHatInsights/host-metering/
 
 Source:         %{name}-%{version}.tar.gz
 
-%if 0%{?rhel} <= 7 && ! 0%{?fedora} && ! 0%{?centos}
-BuildRequires: go-toolset-1.19
+BuildRequires: python3 >= 3.6
+BuildRequires: make
+BuildRequires: openssl
+%if 0%{?rhel} == 7
+BuildRequires: systemd
 %else
-BuildRequires: golang >= 1.19
 BuildRequires: systemd-rpm-macros
-%endif
-
-%if 0%{?rhel} > 8 || 0%{?fedora}
-BuildRequires: go-rpm-macros
 %endif
 
 BuildRequires: git
@@ -46,6 +34,8 @@ BuildRequires: policycoreutils
 BuildRequires: selinux-policy
 BuildRequires: selinux-policy-devel
 Requires:      %{name}-selinux = %{version}-%{release}
+Requires:      python3 >= 3.6
+Requires:      subscription-manager
 
 %description
 Host metering service
@@ -66,8 +56,7 @@ This package installs and sets up the SELinux policy security module for host-me
 %autopatch -p1
 
 %build
-pwd
-%gobuild -o $(pwd)/bin/host-metering %{goipath}
+make build PYTHON=python3
 make build-selinux
 
 %pre selinux
@@ -75,7 +64,7 @@ make build-selinux
 
 %install
 install -m 0755 -vd                     %{buildroot}%{_bindir}
-install -m 0755 -vp $(pwd)/bin/*        %{buildroot}%{_bindir}/
+install -m 0755 -vp dist/host-metering  %{buildroot}%{_bindir}/host-metering
 install -m 0755 -vd                     %{buildroot}%{_unitdir}
 install -m 644 contrib/systemd/host-metering.service %{buildroot}%{_unitdir}/%{name}.service
 install -m 0755 contrib/systemd/host-metering-proxy-setup.sh %{buildroot}%{_bindir}/host-metering-proxy-setup.sh
@@ -91,6 +80,7 @@ install -D -p -m 644 contrib/selinux/%{modulename}.if %{buildroot}%{_datadir}/se
 
 %if %{with check}
 %check
+make test PYTHON=python3
 %endif
 
 %post

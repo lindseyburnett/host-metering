@@ -1,50 +1,14 @@
-// For format details, see https://aka.ms/devcontainer.json. For config options, see the
-// README at: https://github.com/devcontainers/templates/tree/main/src/go
 {
-	"name": "Go",
-	// Or use a Dockerfile or Docker Compose file. More info: https://containers.dev/guide/dockerfile
-	// "image": "mcr.microsoft.com/devcontainers/go:1.19",
-
-	"workspaceFolder": "/workspace/host-metering",
-
-	// to set the local folder prepare_containers script should run first.
-	// "initializeCommand": "${localWorkspaceFolder}/.devcontainer/commands/prepare_containers.sh",
-
-	"dockerComposeFile" : ["./docker-compose.yml", "./docker-compose.local.yml"],
-	"service" : "host-metering",
-	"shutdownAction" : "stopCompose",
-
-	// Features to add to the dev container. More info: https://containers.dev/features.
-	"features": {
-    // "ghcr.io/devcontainers/features/common-utils:2": {}
-	},
-
-	// Use 'forwardPorts' to make a list of ports inside the container available locally.
-	// "forwardPorts": [],
-
-	// Use 'postCreateCommand' to run commands after the container is created.
-	// "postCreateCommand": "go version",
-
-	// Configure tool-specific properties.
-	// "customizations": {},
-
-	// Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
-	// "remoteUser": "root"
-
-	"remoteUser": "root",
-	"remoteEnv": {
-		"HOME": "/home"
-	},
-	"containerUser": "root",
-	"containerEnv": {
-		"HOME": "/home",
-		"WORKDIR": "/workspaces/${localWorkspaceFolderBasename}"
-	},
-	"customizations": {
-		"vscode": {
-			"extensions": [
-				"golang.go"
-			]
-		}
-	}
+  "name": "Host Metering Python",
+  "workspaceFolder": "/workspace/host-metering",
+  "dockerComposeFile": ["./docker-compose.yml", "./docker-compose.local.yml"],
+  "service": "host-metering",
+  "shutdownAction": "stopCompose",
+  "remoteUser": "root",
+  "containerUser": "root",
+  "customizations": {
+    "vscode": {
+      "extensions": ["ms-python.python", "ms-python.debugpy"]
+    }
+  }
 }

@@ -1,5 +1,4 @@
 {
-  "go.alternateTools": {
-    "go": "/opt/rh/go-toolset-1.19/root/usr/bin/go"
-  }
+  "python.testing.unittestEnabled": true,
+  "python.testing.unittestArgs": ["discover", "-s", "tests", "-v"]
 }

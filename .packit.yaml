@@ -13,7 +13,7 @@ srpm_build_deps:
   - gzip
   - tar
   - rpm-build
-  - golang
+  - python3
 
 actions:
   create-archive:

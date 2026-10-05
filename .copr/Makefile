@@ -2,7 +2,7 @@
 
 srpm:
 	# Setup development environment
-	dnf install -y git make curl gzip tar rpm-build golang
+	dnf install -y git make curl gzip tar rpm-build python3
 
 	# Generate SRPM
 	make rpm/srpm

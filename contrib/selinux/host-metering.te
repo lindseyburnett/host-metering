@@ -53,12 +53,17 @@ corenet_tcp_connect_websm_port(hostmetering_t)
 dev_list_sysfs(hostmetering_t)
 dev_read_raw_memory(hostmetering_t)
 dev_read_sysfs(hostmetering_t)
+dev_read_urand(hostmetering_t)
 
 files_list_tmp(hostmetering_t)
 
 init_read_state(hostmetering_t)
 
 libs_exec_ldconfig(hostmetering_t)
+libs_use_ld_so(hostmetering_t)
+libs_use_shared_libs(hostmetering_t)
+files_read_usr_files(hostmetering_t)
+miscfiles_read_generic_certs(hostmetering_t)
 
 optional_policy(`
      sysnet_dns_name_resolve(hostmetering_t)

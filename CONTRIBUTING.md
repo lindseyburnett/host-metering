@@ -116,12 +116,12 @@ Semantic-release is configured in [.releaserc](.releaserc).
 It:
 - determines the current version based on git tags
 - determines the next version based on commit messages
-- bumps version in version/version.go
+- bumps version in host_metering/__init__.py
 - generates CHANGELOG.md update
 - commits the changes
 - creates a git tag
 - pushes the changes to the repo
-- makes a tarball with vendor dependencies included
+- makes a Python source tarball (the runtime uses only the standard library)
 - creates a GitHub release with the tarball attached
 
 ### Start a release
