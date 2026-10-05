@@ -30,8 +30,8 @@ python -m pip install .
 host-metering daemon
 ```
 
-The commands are `daemon`, `once`, and `help`. `--version` prints the release
-version. Both `--config` and the former Go spelling `-config` are accepted.
+The commands are `daemon`, `once`, `migrate-wal`, and `help`. `--version` prints
+the release version. Both `--config` and `-config` are accepted.
 
 Build a standalone executable zip archive using only Python's standard library:
 
@@ -72,8 +72,11 @@ disables periodic label refresh. `metrics_max_age_sec=0` disables expiration.
 The write interval must exceed the configured maximum retry duration.
 
 `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` are supported, including CIDR,
-subdomain, and port entries. The systemd launcher also reads proxy settings from
-`/etc/rhsm/rhsm.conf`. Server certificates are verified using the system trust
+subdomain, and port entries. The systemd service starts Python directly with
+`--rhsm-config /etc/rhsm/rhsm.conf` to fill missing proxy values from the `[server]`
+section's `proxy_hostname` and `proxy_port`. Each nonempty HTTP/HTTPS environment
+setting, including lowercase variants, takes precedence independently.
+Server certificates are verified using the system trust
 store; `SSL_CERT_FILE` and `SSL_CERT_DIR` can select an additional deployment's
 trust configuration through Python/OpenSSL.
 
@@ -111,12 +114,26 @@ and [Snappy format](https://github.com/google/snappy/blob/main/format_descriptio
 
 1. Stop the old service and back up its configuration and metrics directory.
 2. Install the Python build with the same configuration and metrics directory.
-3. Start the service. Existing tidwall/wal binary segments are imported into
-   SQLite in one transaction, including committed START/END truncations.
+3. Run the migration command with the service's configuration:
+
+   ```sh
+   host-metering --config /etc/host-metering.conf migrate-wal
+   ```
+
+4. Start the service after migration completes.
+
+The command imports tidwall/wal binary segments into SQLite in one transaction,
+including committed START/END truncations. It does not contact the receiver or
+require subscription-manager or TLS credentials. It uses `metrics_wal_path`,
+including a `HOST_METERING_METRICS_WAL_PATH` override if set.
 
 Original segments are retained, and a database marker prevents reimport on later
-starts. A corrupt legacy queue stops startup with an error so it can be repaired
-without silently losing samples. Do not run the Go and Python services together.
+command invocations. Existing markers from the earlier automatic importer are
+honored. The daemon does not load the legacy decoder or automatically migrate
+files; if it detects an unmigrated queue, it stops with migration instructions.
+A corrupt queue rolls back the import so the files can be repaired and the
+command retried. Fresh installations need no migration. Stop all metering
+processes before importing, and do not run the Go and Python services together.
 The new SQLite queue is not readable by Go; a rollback requires an explicit queue
 migration or draining the Python queue first, and must avoid replaying the
 retained legacy segments.
@@ -173,14 +190,17 @@ make mock-8
 make mock-9
 ```
 
-The RPM installs the executable Python archive, existing systemd service, man
-pages, proxy launcher, and SELinux policy. It requires Python 3 and
+The RPM installs the executable Python archive, systemd service, man pages, and
+SELinux policy. Proxy setup runs inside Python. It requires Python 3 and
 subscription-manager. The service commands are unchanged:
 
 ```sh
 systemctl enable --now host-metering
 journalctl -feu host-metering
 ```
+
+Custom unit overrides that invoke `host-metering-proxy-setup.sh` should use
+`/usr/bin/host-metering --rhsm-config /etc/rhsm/rhsm.conf daemon` instead.
 
 `make version-update NEXT_VERSION=x.y.z` updates `host_metering/__init__.py`.
 Semantic release uses that version for source archives and RPMs. See

@@ -6,7 +6,7 @@ host-metering \- Host metering service
 .SH "SYNOPSIS"
 .B host-metering
 [\fB\-\-config\fR \fICONFIG_FILE_PATH\fR]
-.IR "daemon|once|help"
+.IR "daemon|once|migrate-wal|help"
 
 .SH "DESCRIPTION"
 .B host-metering
@@ -18,6 +18,29 @@ CPU count together with subscription and cloud information.
 .BR \-\-config =\fICONFIG_FILE_PATH\fR
 Path to configuration file.
 Default is /etc/host-metering.conf
+.TP
+.BR \-\-rhsm-config =\fIRHSM_CONFIG_FILE_PATH\fR
+Fill missing HTTP and HTTPS proxy settings from the [server] section's
+proxy_hostname and proxy_port values. Nonempty uppercase or lowercase proxy
+environment variables take precedence independently. The systemd service sets
+this option to /etc/rhsm/rhsm.conf.
+
+.SH "COMMANDS"
+.TP
+.B daemon
+Collect and send samples at the configured intervals.
+.TP
+.B once
+Collect and send once.
+.TP
+.B migrate-wal
+Import a legacy binary WAL into the SQLite queue at metrics_wal_path.
+Stop all metering processes before running this command. Imports are
+transactional and repeated runs do not duplicate samples. Original files are
+retained. No receiver connection or host credentials are needed.
+.TP
+.B help
+Print command usage.
 
 .SH "ENVIRONMENT VARIABLES"
 .PP
@@ -92,7 +115,8 @@ Timeout for write to remote server in seconds.
 Maximum age of collected metrics in seconds. After the time, the metrics are dropped.
 
 \fBHOST_METERING_METRICS_WAL_PATH\fR
-Path to directory where write ahead log files are stored.
+Directory containing the SQLite sample queue. Also selects the legacy queue
+directory for migrate-wal.
 
 \fBHOST_METERING_LOG_LEVEL\fR
 Log level. Possible values are: DEBUG, INFO, WARN, ERROR.
@@ -112,11 +136,12 @@ Default configuration file.
 .PP
 \fI/var/run/host-metering\fR
 .RS 4
-The default directory for storing write ahead log files
+The default directory for storing the sample queue.
+.RE
 .PP
-The Python implementation stores samples in samples.sqlite3 and imports the
-former Go binary WAL segments once on first startup. Stop the old service before
-upgrading; the original segments are retained.
+Samples are stored in samples.sqlite3. Use migrate-wal to import legacy binary
+segments before starting the service. Startup reports an error if unmigrated
+segments are present; no automatic import occurs.
 
 .SH "SIGNALS"
 SIGHUP refreshes subscription labels and TLS credentials. SIGINT and SIGTERM stop

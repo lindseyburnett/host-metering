@@ -23,21 +23,6 @@ def encode_varint(value):
     return bytes(result)
 
 
-def read_varint(data, offset=0):
-    value = 0
-    for shift in range(0, 70, 7):
-        if offset >= len(data):
-            raise ValueError("Truncated varint")
-        byte = data[offset]
-        offset += 1
-        if shift == 63 and byte > 1:
-            raise ValueError("Varint overflow")
-        value |= (byte & 127) << shift
-        if byte < 128:
-            return value, offset
-    raise ValueError("Invalid varint")
-
-
 def _message(field, data):
     return encode_varint((field << 3) | 2) + encode_varint(len(data)) + data
 
@@ -45,37 +30,6 @@ def _message(field, data):
 def encode_sample(sample):
     return (b"\x09" + struct.pack("<d", sample.value) + b"\x10"
             + encode_varint(sample.timestamp & 0xFFFFFFFFFFFFFFFF))
-
-
-def decode_sample(data):
-    """Read old Go WAL samples, rejecting truncated/invalid protobuf fields."""
-    offset, value, timestamp = 0, 0.0, 0
-    while offset < len(data):
-        tag, offset = read_varint(data, offset)
-        field, kind = tag >> 3, tag & 7
-        if field == 0:
-            raise ValueError("Invalid protobuf field")
-        if kind == 0:
-            number, offset = read_varint(data, offset)
-            if field == 2:
-                timestamp = number if number < (1 << 63) else number - (1 << 64)
-        elif kind in (1, 5):
-            size = 8 if kind == 1 else 4
-            if offset + size > len(data):
-                raise ValueError("Truncated protobuf field")
-            if field == 1 and kind == 1:
-                value = struct.unpack_from("<d", data, offset)[0]
-            offset += size
-        elif kind == 2:
-            size, offset = read_varint(data, offset)
-            offset += size
-            if offset > len(data):
-                raise ValueError("Truncated protobuf field")
-        else:
-            raise ValueError("Unsupported protobuf wire type")
-        if (field == 1 and kind != 1) or (field == 2 and kind != 0):
-            raise ValueError("Invalid sample field type")
-    return Sample(value, timestamp)
 
 
 def encode_write_request(labels, samples):

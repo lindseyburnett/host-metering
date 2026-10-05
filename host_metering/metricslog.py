@@ -1,4 +1,4 @@
-"""Durable sample queue, with transactional import of the former Go WAL."""
+"""Durable SQLite sample queue."""
 
 import fcntl
 import os
@@ -8,50 +8,18 @@ import sqlite3
 import threading
 import time
 
-from .wire import Sample, decode_sample, read_varint
+from .wire import Sample
 
 
-def legacy_samples(directory):
-    """Read tidwall/wal v1.1.7's default binary segments without altering them.
-
-    Each record is a varint length followed by a protobuf Sample. Empty records
-    are checkpoints. START/END select committed truncations after a crash.
-    Format: https://github.com/tidwall/wal/blob/v1.1.7/wal.go
-    """
-    segments = sorted(p for p in directory.iterdir() if p.is_file()
-                      and re.fullmatch(r"[0-9]{20}(?:\.START|\.END)?", p.name)
-                      and int(p.name[:20]) > 0)
-    starts = [i for i, p in enumerate(segments) if p.suffix == ".START"]
-    ends = [i for i, p in enumerate(segments) if p.suffix == ".END"]
-    if len(starts) > 1 or len(ends) > 1 or (starts and ends):
-        raise ValueError("Inconsistent legacy WAL truncation markers")
-    if starts:
-        segments = segments[starts[0]:]
-    elif ends:
-        segments = segments[:ends[0] + 1]
-        if len(segments) > 1 and segments[-2].name[:20] == segments[-1].name[:20]:
-            del segments[-2]
-    expected = None
-    for segment in segments:
-        index = int(segment.name[:20])
-        if expected is not None and index != expected:
-            raise ValueError("Non-contiguous legacy WAL at " + str(segment))
-        data = segment.read_bytes()
-        offset = 0
-        while offset < len(data):
-            size, offset = read_varint(data, offset)
-            end = offset + size
-            if end > len(data):
-                raise ValueError("Truncated legacy WAL at " + str(segment))
-            if size:
-                yield decode_sample(data[offset:end])
-            offset = end
-            index += 1
-        expected = index
+def legacy_segments(directory):
+    """Recognize old queue files without loading their decoder at startup."""
+    return sorted(p for p in directory.iterdir() if p.is_file()
+                  and re.fullmatch(r"[0-9]{20}(?:\.START|\.END)?", p.name)
+                  and int(p.name[:20]) > 0)
 
 
 class MetricsLog:
-    def __init__(self, path):
+    def __init__(self, path, allow_legacy=False):
         if not path:
             raise ValueError("metrics log path cannot be empty")
         self.path = Path(path)
@@ -73,16 +41,15 @@ class MetricsLog:
             self._db.execute("CREATE TABLE IF NOT EXISTS metadata ("
                              "key TEXT PRIMARY KEY, value TEXT NOT NULL)")
             self._db.commit()
-            with self._db:
-                imported = self._db.execute(
-                    "SELECT value FROM metadata WHERE key='legacy_imported'"
-                ).fetchone()
-                if imported is None:
-                    self._db.executemany(
-                        "INSERT INTO samples(value, timestamp) VALUES (?, ?)",
-                        legacy_samples(self.path),
+            if not allow_legacy and legacy_segments(self.path):
+                if not self._db.execute(
+                    "SELECT 1 FROM metadata WHERE key='legacy_imported'"
+                ).fetchone():
+                    raise ValueError(
+                        "Unmigrated WAL files found in {}. Stop the old service, then run "
+                        "host-metering migrate-wal with the same --config or "
+                        "HOST_METERING_METRICS_WAL_PATH before starting the daemon.".format(self.path)
                     )
-                    self._db.execute("INSERT INTO metadata VALUES ('legacy_imported', '1')")
         except BaseException:
             self.close()
             raise
@@ -93,6 +60,22 @@ class MetricsLog:
         with self._mutex, self._db:
             self._db.execute("INSERT INTO samples(value, timestamp) VALUES (?, ?)",
                              (float(cpu_count), timestamp))
+
+    def import_samples_once(self, marker, samples):
+        """Commit an iterable and its migration marker atomically.
+
+        Return the inserted count, or None if this import already completed.
+        The queue lock excludes daemon activity while migration is in progress.
+        """
+        with self._mutex, self._db:
+            if self._db.execute("SELECT 1 FROM metadata WHERE key=?", (marker,)).fetchone():
+                return None
+            count = 0
+            for sample in samples:
+                self._db.execute("INSERT INTO samples(value, timestamp) VALUES (?, ?)", sample)
+                count += 1
+            self._db.execute("INSERT INTO metadata VALUES (?, '1')", (marker,))
+            return count
 
     def get_samples(self):
         with self._mutex:

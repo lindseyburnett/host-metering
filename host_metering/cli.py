@@ -8,6 +8,7 @@ import sys
 from . import __version__
 from .config import Config, DEFAULT_CONFIG_PATH
 from .daemon import Daemon
+from .proxy import apply_rhsm_proxy
 
 
 def configure_logging(config):
@@ -38,7 +39,8 @@ def main(argv=None):
     parser.add_argument("--config", "-config", default=DEFAULT_CONFIG_PATH,
                         help="configuration file path (default: %(default)s)")
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("command", choices=("daemon", "once", "help"))
+    parser.add_argument("--rhsm-config", help="fill missing proxy settings from this RHSM config file")
+    parser.add_argument("command", choices=("daemon", "once", "migrate-wal", "help"))
     args = parser.parse_args(argv)
     if args.command == "help":
         parser.print_help()
@@ -51,19 +53,35 @@ def main(argv=None):
         messages.append("Failed to process config file: {}".format(exc))
     messages.extend(config.update_from_env())
     try:
-        config.validate()
+        if args.command != "migrate-wal":
+            config.validate()
+        elif not config.metrics_wal_path:
+            raise ValueError("metrics_wal_path must be defined")
     except ValueError as exc:
         print("Invalid configuration: {}".format(exc), file=sys.stderr)
         return 2
     try:
         logger = configure_logging(config)
+    except ValueError as exc:
+        print("Invalid logging configuration: {}".format(exc), file=sys.stderr)
+        return 2
     except OSError as exc:
         print("Failed to initialize logger: {}".format(exc), file=sys.stderr)
         return 1
+    if args.rhsm_config and args.command != "migrate-wal":
+        messages.extend(apply_rhsm_proxy(args.rhsm_config))
     for message in messages:
         logger.warning(message)
     logger.info("%s", config)
     try:
+        if args.command == "migrate-wal":
+            from .migrate import migrate_metrics
+            count = migrate_metrics(config.metrics_wal_path)
+            if count is None:
+                logger.info("WAL migration already completed; no samples imported")
+            else:
+                logger.info("WAL migration completed: imported %d sample(s)", count)
+            return 0
         with Daemon(config) as daemon:
             if args.command == "once":
                 daemon.run_once()

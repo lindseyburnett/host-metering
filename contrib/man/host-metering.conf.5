@@ -89,7 +89,8 @@ Maximum age of collected metrics in seconds. After the time, the metrics are dro
 .PP
 metrics_wal_path (string)
 .RS 4
-Path to directory where write ahead log files are stored.
+Path to the directory containing the SQLite sample queue. The migrate-wal
+command imports legacy binary segments from this directory.
 .RE
 
 .PP

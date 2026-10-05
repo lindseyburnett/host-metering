@@ -37,7 +37,7 @@ def should_notify(samples, host):
 
 
 def proxy_for_url(url, environ=None):
-    """Keep Go's NO_PROXY CIDR, port and subdomain matching behavior."""
+    """Select an environment proxy with CIDR, port and subdomain bypass rules."""
     environ = os.environ if environ is None else environ
     target = urlsplit(url)
     host = (target.hostname or "").lower().rstrip(".")
